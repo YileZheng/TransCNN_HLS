@@ -82,9 +82,22 @@ void vector1d2array1d(
 ){
     for (int y = 0; y < D0; y++){ 
         for (int x = 0; x < D1; x++){
-            arr[y * D1 + x] = vin[y*D1 + x];
+            arr[(y+1) * D1 - x -1] = vin[y*D1 + x];
         }
     }
+}
+
+template <typename T, int D0, int D1>  // changed to 1d array
+vector<T> array1d2vector1d(
+    T* arr
+){
+    vector<T> vo;
+    for (int y = 0; y < D0; y++){ 
+        for (int x = 0; x < D1; x++){
+            vo[y*D1 + x] = arr[(y+1) * D1 - x -1];
+        }
+	}
+    return vo;
 }
 
 template <typename T, int D0>
@@ -178,12 +191,13 @@ int main(int argc, char **argv)
 		elapsed_ms = (double)(end-start) / CLOCKS_PER_SEC * 1000000;
 
         /* Output result saving */
+		vector<pricebase_t> vout = array1d2vector1d<pricebase_t, 2, IFAGGREGATE_SIZE>(wr_addr);
 		answer << concat_string(line_splito, string(",")) << std::endl;
-		result << concat_string(vector<pricebase_t>(wr_addr, wr_addr + OUTPUT_LENGTH), string(",")) << std::endl;
+		result << concat_string(vout, string(",")) << std::endl;
 		std::cout << "Line " << id; 
 
         /* Output result checking */
-        if (!approx_equal<pricebase_t, OUTPUT_LENGTH>(slicing(line_splito,  line_splito.size()-OUTPUT_LENGTH, line_splito.size()-1), wr_addr)){
+        if (!approx_equal<pricebase_t, OUTPUT_LENGTH>(slicing(line_splito,  line_splito.size()-OUTPUT_LENGTH, line_splito.size()-1), &vout[0])){
             retval = -1;
 			std::cout << " Fail" << std::endl;
             break;
