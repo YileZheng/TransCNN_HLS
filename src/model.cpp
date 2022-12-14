@@ -321,7 +321,7 @@ void crop_pred(
                 };
     
     for (int i = 0; i < IFAGGRE_LENGTH(OUTPUT_LENGTH); i++){
-#pragma HLS PIPELINE off
+#pragma HLS PIPELINE II=2
         tout[i] = tmp[i];
     }
     // for (int io = 0; io < OUTPUT_LENGTH; io++){
