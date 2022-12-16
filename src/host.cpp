@@ -61,13 +61,16 @@ typedef uint32_t u32;
 #define KRNL_CONF_ADDR_A_DATA       0x10
 #define KRNL_CONF_ADDR_B_DATA       0x1c
 #define KRNL_CONF_ADDR_AP_CTRL      0x00
-#define KRNL_REG_BASE_ADDR          0xA0000000
+#define AXI_SGNL_GPIO_ADDR			0xA0000000
+#define KRNL_REG_BASE_ADDR          0xA0020000
 /* transfer related definitions */
 #define RD_ADDR                     0x10000000
 #define WR_ADDR                     0x20000000
 #define INTI_DATA_LEN               2*1024*1024
 #define TRANS_LEN                   64
 #define TEST_LOOP_NUM               3
+
+#define lluint long long unsigned int
 
 
 vector<pricebase_t> split_string(std::string s,std::string delimiter);
@@ -82,22 +85,9 @@ void vector1d2array1d(
 ){
     for (int y = 0; y < D0; y++){ 
         for (int x = 0; x < D1; x++){
-            arr[(y+1) * D1 - x -1] = vin[y*D1 + x];
+            arr[y * D1 + x] = vin[y*D1 + x];
         }
     }
-}
-
-template <typename T, int D0, int D1>  // changed to 1d array
-vector<T> array1d2vector1d(
-    T* arr
-){
-    vector<T> vo;
-    for (int y = 0; y < D0; y++){ 
-        for (int x = 0; x < D1; x++){
-            vo[y*D1 + x] = arr[(y+1) * D1 - x -1];
-        }
-	}
-    return vo;
 }
 
 template <typename T, int D0>
@@ -126,6 +116,7 @@ int main(int argc, char **argv)
     // int dh = open("/dev/mem", O_RDWR | O_SYNC);
     int dh = open("/dev/mem", O_RDWR);
     pricebase_t* krnl_reg_base = (pricebase_t*)mmap(NULL, 65536, PROT_READ | PROT_WRITE, MAP_SHARED, dh, KRNL_REG_BASE_ADDR);
+	pricebase_t* axi_sgnl_gpio = (pricebase_t*)mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, dh, AXI_SGNL_GPIO_ADDR);
     pricebase_t* rd_addr       = (pricebase_t*)mmap(NULL, 4*1024, PROT_READ | PROT_WRITE, MAP_SHARED, dh, RD_ADDR);
     pricebase_t* wr_addr       = (pricebase_t*)mmap(NULL, 4*1024, PROT_READ | PROT_WRITE, MAP_SHARED, dh, WR_ADDR);
 
@@ -138,9 +129,13 @@ int main(int argc, char **argv)
 	ifstream inputs, outputs;
 	ofstream result, answer;
 
-	clock_t start, end;
-	double elapsed_ms;
-	double elapsed_sum = 0;
+	// clock_t start, end;
+	// double elapsed_ms;
+	// double elapsed_sum = 0;
+	struct timespec start = {0, 0};
+	struct timespec end = {0, 0};
+	lluint elapsed_sum = 0;
+	lluint elapsed_ms;
 
 	result.open(result_path, ios::out | ios::trunc);
 	answer.open(answer_path, ios::out | ios::trunc);
@@ -171,6 +166,9 @@ int main(int argc, char **argv)
         vector1d2array1d<pricebase_t, INPUT_LENGTH, INPUT_SIZE>(line_split, rd_addr);
 
         // Configure and start up the kernel
+		/* set axi signals for cache coherency */
+		XAdder_apint_WriteReg(axi_sgnl_gpio, 0, 0x4002FF0);
+
         /* set read address */
         XAdder_apint_WriteReg(krnl_reg_base, KRNL_CONF_ADDR_A_DATA, RD_ADDR);
         XAdder_apint_WriteReg(krnl_reg_base, KRNL_CONF_ADDR_A_DATA + 4, 0x0);
@@ -180,24 +178,27 @@ int main(int argc, char **argv)
         XAdder_apint_WriteReg(krnl_reg_base, KRNL_CONF_ADDR_B_DATA + 4, 0x0);
 
         /* start the kernel */
-        start = clock();
+        // start = clock();
         uint control = (XAdder_apint_ReadReg(krnl_reg_base, KRNL_CONF_ADDR_AP_CTRL) & 0x80);
         XAdder_apint_WriteReg(krnl_reg_base, KRNL_CONF_ADDR_AP_CTRL, control | 0x01);
 
+		clock_gettime(CLOCK_REALTIME, &start);
         while (((XAdder_apint_ReadReg(krnl_reg_base, KRNL_CONF_ADDR_AP_CTRL) >> 1) & 0x1) == 0) {
             // wait until kernel finish running
         }
-		end = clock();
-		elapsed_ms = (double)(end-start) / CLOCKS_PER_SEC * 1000000;
+		// end = clock();
+		clock_gettime(CLOCK_REALTIME, &end);
+		// elapsed_ms = (double)(end-start) / CLOCKS_PER_SEC * 1000000;
+		elapsed_ms = end.tv_nsec-start.tv_nsec;
+        // printf("duration %d is %lluns\n", i, duration);
 
         /* Output result saving */
-		vector<pricebase_t> vout = array1d2vector1d<pricebase_t, 2, IFAGGREGATE_SIZE>(wr_addr);
 		answer << concat_string(line_splito, string(",")) << std::endl;
-		result << concat_string(vout, string(",")) << std::endl;
+		result << concat_string(vector<pricebase_t>(wr_addr, wr_addr + OUTPUT_LENGTH), string(",")) << std::endl;
 		std::cout << "Line " << id; 
 
         /* Output result checking */
-        if (!approx_equal<pricebase_t, OUTPUT_LENGTH>(slicing(line_splito,  line_splito.size()-OUTPUT_LENGTH, line_splito.size()-1), &vout[0])){
+        if (!approx_equal<pricebase_t, OUTPUT_LENGTH>(slicing(line_splito,  line_splito.size()-OUTPUT_LENGTH, line_splito.size()-1), wr_addr)){
             retval = -1;
 			std::cout << " Fail" << std::endl;
             break;
